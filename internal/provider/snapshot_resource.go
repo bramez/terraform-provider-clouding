@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -12,7 +13,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.

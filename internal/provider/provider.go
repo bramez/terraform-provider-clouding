@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -14,7 +15,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 )
 
 // Ensure CloudingProvider satisfies various provider interfaces.

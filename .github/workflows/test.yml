@@ -45,6 +45,11 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+      # go generate runs `terraform fmt` (see main.go). The runner images stopped
+      # shipping Terraform, so without this the step fails before tfplugindocs runs.
+      - uses: hashicorp/setup-terraform@a1502cd9e758c50496cc9ac5308c4843bcd56d36 # v3.0.0
+        with:
+          terraform_wrapper: false
       - run: go generate ./...
       - name: git diff
         run: |
@@ -55,6 +60,9 @@ jobs:
   test:
     name: Terraform Provider Acceptance Tests
     needs: build
+    # Acceptance tests create real, billable resources through the Clouding API,
+    # so they only run where a token has deliberately been configured.
+    if: ${{ vars.RUN_ACCEPTANCE_TESTS == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:

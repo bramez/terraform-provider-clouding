@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -26,13 +26,13 @@ type ServerDataSource struct {
 
 // ServerDataSourceModel describes the data source data model.
 type ServerDataSourceModel struct {
-	Id                    types.String          `tfsdk:"id"`
-	Name                  types.String          `tfsdk:"name"`
-	Hostname              types.String          `tfsdk:"hostname"`
-	Vcores                types.Number          `tfsdk:"vcores"`
-	RamGB                 types.Number          `tfsdk:"ram_gb"`
-	Flavor                types.String          `tfsdk:"flavor"`
-	VolumeSizeGB          types.Number          `tfsdk:"volume_size_gb"`
+	Id           types.String `tfsdk:"id"`
+	Name         types.String `tfsdk:"name"`
+	Hostname     types.String `tfsdk:"hostname"`
+	Vcores       types.Number `tfsdk:"vcores"`
+	RamGB        types.Number `tfsdk:"ram_gb"`
+	Flavor       types.String `tfsdk:"flavor"`
+	VolumeSizeGB types.Number `tfsdk:"volume_size_gb"`
 	// The nested single blocks are pointers so they can represent null: in a
 	// data source configuration every computed attribute arrives null, and a
 	// non-pointer struct cannot hold that.

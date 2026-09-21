@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/bramez/terraform-provider-clouding/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/bramez/terraform-provider-clouding/internal/provider"
 )
 
 func TestAccSshKey(t *testing.T) {

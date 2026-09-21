@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
