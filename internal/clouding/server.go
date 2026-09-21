@@ -93,7 +93,10 @@ func (a *API) GetServerID(server *Server) error {
 		return fmt.Errorf("error decoding server: %s", err)
 	}
 	server.FlavorID = server.Flavor
-	server.FirewallID = server.Firewalls[0].ID
+	// Guarded: a server with no firewall attached would panic on Firewalls[0].
+	if len(server.Firewalls) > 0 {
+		server.FirewallID = server.Firewalls[0].ID
+	}
 	if server.Volume != nil {
 		server.Volume.SsdGb = server.VolumeSizeGb
 		// FIXME: This is a workaround to avoid volume source value inconsistency"
@@ -121,7 +124,7 @@ func (a *API) CreateServer(server *Server) error {
 		if err != nil {
 			return fmt.Errorf("error decoding error response: %s", err)
 		}
-		return fmt.Errorf("error creating server, status code: %d, title: %s, detail: %s", errorResponse.Status, errorResponse.Title, errorResponse.Detail)
+		return fmt.Errorf("error creating server, status code: %d, title: %s, detail: %s, validation errors: %s", errorResponse.Status, errorResponse.Title, errorResponse.Detail, errorResponse.ValidationErrors())
 
 	}
 

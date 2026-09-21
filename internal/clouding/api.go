@@ -2,6 +2,7 @@ package clouding
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -17,13 +18,26 @@ type API struct {
 }
 
 type ErrorResponse struct {
-	Type     string                `json:"type"`
-	Title    string                `json:"title"`
-	Status   int                   `json:"status"`
-	Detail   string                `json:"detail,omitempty"`
-	Instance string                `json:"instance,omitempty"`
-	TraceID  string                `json:"traceId,omitempty"`
-	Errors   []map[string][]string `json:"errors,omitempty"`
+	Type     string `json:"type"`
+	Title    string `json:"title"`
+	Status   int    `json:"status"`
+	Detail   string `json:"detail,omitempty"`
+	Instance string `json:"instance,omitempty"`
+	TraceID  string `json:"traceId,omitempty"`
+	// Errors is kept as raw JSON because the API returns field-level validation
+	// errors as an object ({"field": ["msg"]}), not as an array. Decoding it into
+	// a fixed Go shape made every validation error fail to decode, masking the
+	// real message behind "cannot unmarshal object into Go struct field".
+	Errors json.RawMessage `json:"errors,omitempty"`
+}
+
+// ValidationErrors returns the raw field-level validation errors as a string,
+// or an empty string when the response carried none.
+func (e ErrorResponse) ValidationErrors() string {
+	if len(e.Errors) == 0 {
+		return ""
+	}
+	return string(e.Errors)
 }
 
 type option func(*API) error
