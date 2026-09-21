@@ -1,4 +1,4 @@
-module github.com/renemontilva/terraform-provider-clouding
+module github.com/bramez/terraform-provider-clouding
 
 go 1.21
 

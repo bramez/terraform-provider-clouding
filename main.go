@@ -8,7 +8,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/renemontilva/terraform-provider-clouding/internal/provider"
+	"github.com/bramez/terraform-provider-clouding/internal/provider"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
@@ -40,7 +40,7 @@ func main() {
 
 	// ServeOpts contains options for serving the Terraform Clouding provider.
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/renemontilva/clouding",
+		Address: "registry.terraform.io/bramez/clouding",
 		Debug:   debug,
 	}
 
