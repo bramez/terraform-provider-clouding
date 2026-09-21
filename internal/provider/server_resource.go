@@ -322,7 +322,7 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	if plan.AccessConfiguration != nil {
 		accessConfiguration = &clouding.AccessConfiguration{
-			SshKey:       plan.AccessConfiguration.SshKeyID.ValueString(),
+			SshKeyID:     plan.AccessConfiguration.SshKeyID.ValueString(),
 			Password:     plan.AccessConfiguration.Password.ValueString(),
 			SavePassword: plan.AccessConfiguration.SavePassword.ValueBool(),
 		}
