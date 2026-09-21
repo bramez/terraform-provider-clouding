@@ -33,20 +33,23 @@ type ServerDataSourceModel struct {
 	RamGB                 types.Number          `tfsdk:"ram_gb"`
 	Flavor                types.String          `tfsdk:"flavor"`
 	VolumeSizeGB          types.Number          `tfsdk:"volume_size_gb"`
-	ImageModel            ImageModel            `tfsdk:"image"`
-	Status                types.String          `tfsdk:"status"`
-	PowerState            types.String          `tfsdk:"power_state"`
-	Features              []types.String        `tfsdk:"features"`
-	CreatedAt             types.String          `tfsdk:"created_at"`
-	DnsAddresses          types.String          `tfsdk:"dns_addresses"`
-	PublicIP              types.String          `tfsdk:"public_ip"`
-	PrivateIP             types.String          `tfsdk:"private_ip"`
-	SshKeyID              types.String          `tfsdk:"ssh_key_id"`
-	Firewalls             []FirewallModel       `tfsdk:"firewalls"`
-	Snapshots             []SnapshotsModel      `tfsdk:"snapshots"`
-	BackupsModel          []BackupsModel        `tfsdk:"backups"`
-	BackupPreferenceModel BackupPreferenceModel `tfsdk:"backup_preference"`
-	CostModel             CostModel             `tfsdk:"cost"`
+	// The nested single blocks are pointers so they can represent null: in a
+	// data source configuration every computed attribute arrives null, and a
+	// non-pointer struct cannot hold that.
+	ImageModel            *ImageModel            `tfsdk:"image"`
+	Status                types.String           `tfsdk:"status"`
+	PowerState            types.String           `tfsdk:"power_state"`
+	Features              []types.String         `tfsdk:"features"`
+	CreatedAt             types.String           `tfsdk:"created_at"`
+	DnsAddresses          types.String           `tfsdk:"dns_addresses"`
+	PublicIP              types.String           `tfsdk:"public_ip"`
+	PrivateIP             types.String           `tfsdk:"private_ip"`
+	SshKeyID              types.String           `tfsdk:"ssh_key_id"`
+	Firewalls             []FirewallModel        `tfsdk:"firewalls"`
+	Snapshots             []SnapshotsModel       `tfsdk:"snapshots"`
+	BackupsModel          []BackupsModel         `tfsdk:"backups"`
+	BackupPreferenceModel *BackupPreferenceModel `tfsdk:"backup_preference"`
+	CostModel             *CostModel             `tfsdk:"cost"`
 }
 
 type ImageModel struct {
@@ -302,7 +305,7 @@ func (d *ServerDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	state.RamGB = types.NumberValue(big.NewFloat(float64(server.RamGb)))
 	state.Flavor = types.StringValue(server.Flavor)
 	state.VolumeSizeGB = types.NumberValue(big.NewFloat(float64(server.VolumeSizeGb)))
-	state.ImageModel = ImageModel{
+	state.ImageModel = &ImageModel{
 		Id:   types.StringValue(server.Image.ID),
 		Name: types.StringValue(server.Image.Name),
 	}
@@ -346,18 +349,15 @@ func (d *ServerDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	}
 
 	if server.BackupPreference != nil {
-		state.BackupPreferenceModel = BackupPreferenceModel{
+		state.BackupPreferenceModel = &BackupPreferenceModel{
 			Slots:     types.Int64Value(server.BackupPreference.Slots),
 			Frequency: types.StringValue(server.BackupPreference.Frequency),
 		}
 	} else {
-		state.BackupPreferenceModel = BackupPreferenceModel{
-			Slots:     types.Int64Null(),
-			Frequency: types.StringNull(),
-		}
+		state.BackupPreferenceModel = nil
 	}
 
-	state.CostModel = CostModel{
+	state.CostModel = &CostModel{
 		PricePerHour:        types.NumberValue(big.NewFloat(server.Cost.PricePerHour)),
 		PricePerMonthApprox: types.NumberValue(big.NewFloat(server.Cost.PricePerMonthApprox)),
 	}
