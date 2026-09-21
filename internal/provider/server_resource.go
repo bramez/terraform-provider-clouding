@@ -369,9 +369,17 @@ func (r *ServerResource) Create(ctx context.Context, req resource.CreateRequest,
 	plan.FlavorID = types.StringValue(server.FlavorID)
 	plan.FirewallID = types.StringValue(server.FirewallID)
 	if server.AccessConfiguration != nil {
+		// password is Optional and not Computed, so whatever the configuration
+		// planned has to survive the apply untouched. The API never echoes a
+		// password back — it returns "" — and turning a planned null into ""
+		// makes Terraform reject the apply as an inconsistent result.
+		plannedPassword := types.StringNull()
+		if plan.AccessConfiguration != nil {
+			plannedPassword = plan.AccessConfiguration.Password
+		}
 		plan.AccessConfiguration = &AccessConfigurationModel{
 			SshKeyID:     types.StringValue(server.AccessConfiguration.SshKeyID),
-			Password:     types.StringValue(server.AccessConfiguration.Password),
+			Password:     plannedPassword,
 			SavePassword: types.BoolValue(server.AccessConfiguration.SavePassword),
 		}
 	}
@@ -448,9 +456,16 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	state.FlavorID = types.StringValue(server.FlavorID)
 	state.FirewallID = types.StringValue(server.FirewallID)
 	if server.AccessConfiguration != nil {
+		// Same reasoning as in Create: the API does not return the password, so
+		// refreshing it from the response would replace a null with "" and show
+		// permanent drift on every plan.
+		storedPassword := types.StringNull()
+		if state.AccessConfiguration != nil {
+			storedPassword = state.AccessConfiguration.Password
+		}
 		state.AccessConfiguration = &AccessConfigurationModel{
 			SshKeyID:     types.StringValue(server.AccessConfiguration.SshKeyID),
-			Password:     types.StringValue(server.AccessConfiguration.Password),
+			Password:     storedPassword,
 			SavePassword: types.BoolValue(server.AccessConfiguration.SavePassword),
 		}
 	}
