@@ -143,6 +143,7 @@ func (p *CloudingProvider) DataSources(ctx context.Context) []func() datasource.
 	return []func() datasource.DataSource{
 		NewFirewallDataSource,
 		NewImageDataSource,
+		NewServerDataSource,
 		NewSnapshotDataSource,
 		NewSshkeyDataSource,
 	}

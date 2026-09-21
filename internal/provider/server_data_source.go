@@ -3,12 +3,13 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"math/big"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/renemontilva/terraform-provider-clouding/internal/clouding"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
@@ -20,7 +21,7 @@ func NewServerDataSource() datasource.DataSource {
 
 // ServerDataSource defines the data source implementation.
 type ServerDataSource struct {
-	client *http.Client
+	client *clouding.API
 }
 
 // ServerDataSourceModel describes the data source data model.
@@ -96,6 +97,7 @@ func (d *ServerDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 			},
 			"hostname": schema.StringAttribute{
 				MarkdownDescription: "The Server hostname.",
+				Computed:            true,
 			},
 			"vcores": schema.NumberAttribute{
 				MarkdownDescription: "The number of virtual cores allocated for the server.",
@@ -138,7 +140,8 @@ func (d *ServerDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 					"The power state of the server.",
 			},
 			"features": schema.ListAttribute{
-				Computed: true,
+				Computed:    true,
+				ElementType: types.StringType,
 				MarkdownDescription: "The features that are applied to the server. The possible features are:" +
 					"- **AllowSmtpOut:** The Allow SMTP Out feature allows the server to send emails. This feature is disabled by default. To enable it use the Allow server SMTP out endpoint." +
 					"- **AntiDDoSNetworkFilter:** The [strict Anti-DDoS filtering](https://help.clouding.io/hc/en-us/articles/6310749915036) can protect the server under constant DDoS attacks by filtering out incoming malicious traffic. This feature can only be enabled during server creation by setting the value of enableStrictAntiDDoSFiltering to true. This feature cannot be disabled." +
@@ -260,12 +263,12 @@ func (d *ServerDataSource) Configure(ctx context.Context, req datasource.Configu
 		return
 	}
 
-	client, ok := req.ProviderData.(*http.Client)
+	client, ok := req.ProviderData.(*clouding.API)
 
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *http.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			fmt.Sprintf("Expected *clouding.API, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
 
 		return
@@ -284,20 +287,84 @@ func (d *ServerDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	// If applicable, this is a great opportunity to initialize any necessary
-	// provider client data and make a call using it.
-	// httpResp, err := d.client.Do(httpReq)
-	// if err != nil {
-	//     resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read example, got error: %s", err))
-	//     return
-	// }
+	server := clouding.Server{ID: state.Id.ValueString()}
+	err := d.client.GetServerID(&server)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to get server, got error: %s", err))
+		return
+	}
 
-	// For the purposes of this example code, hardcoding a response value to
-	// save into the Terraform state.
+	// Set into the Terraform state.
+	state.Id = types.StringValue(server.ID)
+	state.Name = types.StringValue(server.Name)
+	state.Hostname = types.StringValue(server.Hostname)
+	state.Vcores = types.NumberValue(big.NewFloat(server.VCores))
+	state.RamGB = types.NumberValue(big.NewFloat(float64(server.RamGb)))
+	state.Flavor = types.StringValue(server.Flavor)
+	state.VolumeSizeGB = types.NumberValue(big.NewFloat(float64(server.VolumeSizeGb)))
+	state.ImageModel = ImageModel{
+		Id:   types.StringValue(server.Image.ID),
+		Name: types.StringValue(server.Image.Name),
+	}
+	state.Status = types.StringValue(server.Status)
+	state.PowerState = types.StringValue(server.PowerState)
+	state.CreatedAt = types.StringValue(server.CreatedAt)
+	state.DnsAddresses = types.StringValue(server.DnsAddress)
+	state.PublicIP = types.StringValue(server.PublicIP)
+	state.PrivateIP = types.StringValue(server.PrivateIP)
+	state.SshKeyID = types.StringValue(server.SshKeyID)
+
+	state.Features = make([]types.String, 0, len(server.Features))
+	for _, feature := range server.Features {
+		state.Features = append(state.Features, types.StringValue(feature))
+	}
+
+	state.Firewalls = make([]FirewallModel, 0, len(server.Firewalls))
+	for _, firewall := range server.Firewalls {
+		state.Firewalls = append(state.Firewalls, FirewallModel{
+			Id:   types.StringValue(firewall.ID),
+			Name: types.StringValue(firewall.Name),
+		})
+	}
+
+	state.Snapshots = make([]SnapshotsModel, 0, len(server.Snapshots))
+	for _, snapshot := range server.Snapshots {
+		state.Snapshots = append(state.Snapshots, SnapshotsModel{
+			ID:        types.StringValue(snapshot.ID),
+			Name:      types.StringValue(snapshot.Name),
+			CreatedAt: types.StringValue(snapshot.CreatedAt),
+		})
+	}
+
+	state.BackupsModel = make([]BackupsModel, 0, len(server.Backups))
+	for _, backup := range server.Backups {
+		state.BackupsModel = append(state.BackupsModel, BackupsModel{
+			ID:        types.StringValue(backup.ID),
+			CreatedAt: types.StringValue(backup.CreatedAt),
+			Status:    types.StringValue(backup.Status),
+		})
+	}
+
+	if server.BackupPreference != nil {
+		state.BackupPreferenceModel = BackupPreferenceModel{
+			Slots:     types.Int64Value(server.BackupPreference.Slots),
+			Frequency: types.StringValue(server.BackupPreference.Frequency),
+		}
+	} else {
+		state.BackupPreferenceModel = BackupPreferenceModel{
+			Slots:     types.Int64Null(),
+			Frequency: types.StringNull(),
+		}
+	}
+
+	state.CostModel = CostModel{
+		PricePerHour:        types.NumberValue(big.NewFloat(server.Cost.PricePerHour)),
+		PricePerMonthApprox: types.NumberValue(big.NewFloat(server.Cost.PricePerMonthApprox)),
+	}
 
 	// Write logs using the tflog package
 	// Documentation: https://terraform.io/plugin/log
-	tflog.Trace(ctx, "read a data source")
+	tflog.Trace(ctx, "read Server data source")
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
