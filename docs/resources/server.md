@@ -72,7 +72,7 @@ resource "clouding_server" "example" {
 
 - `access_configuration` (Attributes) When creating a server, you need to choose a method to access it. The two options are SSH key authentication and password authentication. The availability and requirements of these methods depend on the accessMethods of the volume's source. (see [below for nested schema](#nestedatt--access_configuration))
 - `firewall_id` (String) The identifier of the initial firewall that will be attached to the server. Firewalls can be attached or detached after server creation.
-- `flavor_id` (String) The identifier of the desired flavor size. Flavors are pre-defined configurations of CPU and RAM. The list of available flavors can be retrieved from the [flavor sizes](https://api.clouding.io/docs#tag/Sizes/operation/ListAllFlavors) endpoint.
+- `flavor_id` (String) The identifier of the desired flavor size. Flavors are pre-defined configurations of CPU and RAM. The list of available flavors can be retrieved from the [flavor sizes](https://api.clouding.io/docs#tag/Sizes/operation/ListAllFlavors) endpoint. Changing it resizes the server in place.
 - `hostname` (String) The hostname of the server. It should be a valid hostname according to the [domain names RFC](https://www.rfc-editor.org/rfc/rfc1035). This value cannot be changed.
 - `name` (String) The name of the server.
 - `volume` (Attributes) The volume configuration and origin. (see [below for nested schema](#nestedatt--volume))
@@ -107,7 +107,7 @@ Required:
 
 - `id` (String) The unique identifier of the volume's source. This property is used in conjunction with the sourceand it can be from an [image](https://api.clouding.io/docs#tag/Images/operation/ListAllImages), [backup](https://api.clouding.io/docs#tag/Backups/operation/ListAllBackups), [snapshot](https://api.clouding.io/docs#tag/Snapshots/operation/ListAllSnapshots) or [server](https://api.clouding.io/docs#tag/Servers/operation/ListAllServers).
 - `source` (String) Enum: ```image``` ```backup``` ```snapshot``` ```server``` This property is used to specify the source of the volume of the new server.
-- `ssd_gb` (Number) Minimum: >=5The size of the volume in gigabytes. The minimum size depends on the source. For example if the source is snapshot and the snapshot is 20 gigabytes, this property should be set to minimum 20 gigabytes. The list of available volume sizes can be retrieved from the volume sizes endpoint.
+- `ssd_gb` (Number) Minimum: >=5The size of the volume in gigabytes. The minimum size depends on the source. For example if the source is snapshot and the snapshot is 20 gigabytes, this property should be set to minimum 20 gigabytes. The list of available volume sizes can be retrieved from the volume sizes endpoint. Increasing it resizes the volume in place, without recreating the server. The Clouding API cannot shrink a volume, so a smaller size is rejected at plan time.
 
 
 <a id="nestedatt--backup_preference"></a>
