@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// serverStateType replica el schema del recurso server, para poder construir a
-// mano un estado previo y un plan sin pasar por un test de aceptación contra la
-// API real.
+// serverStateType mirrors the server resource schema, so a prior state and a plan
+// can be built by hand without going through an acceptance test against the real
+// API.
 var serverStateType = tftypes.Object{
 	AttributeTypes: map[string]tftypes.Type{
 		"id":          tftypes.String,
@@ -79,9 +79,9 @@ type recordedRequest struct {
 	body   string
 }
 
-// updateServer ejecuta Update() con el estado previo (stateName/stateFlavor/stateSSD)
-// y el plan deseado, contra un servidor HTTP falso, y devuelve las peticiones que
-// el provider ha lanzado a la API.
+// updateServer runs Update() with the given prior state (stateName/stateFlavor/stateSSD)
+// and desired plan against a fake HTTP server, and returns the requests the provider
+// issued to the API.
 func updateServer(t *testing.T, stateName, stateFlavor string, stateSSD int64, planName, planFlavor string, planSSD int64) (*resource.UpdateResponse, []recordedRequest) {
 	t.Helper()
 
@@ -135,8 +135,9 @@ func findRequest(recorded []recordedRequest, method, path string) *recordedReque
 	return nil
 }
 
-// Agrandar el disco tiene que resolverse con un resize in-place: antes de esto
-// `ssd_gb` llevaba RequiresReplace y Terraform destruía y recreaba el servidor.
+// Growing the volume must be settled with an in-place resize: before this,
+// `ssd_gb` carried RequiresReplace and Terraform destroyed and recreated the
+// server.
 func TestServerResourceUpdateResizesVolumeInPlace(t *testing.T) {
 	t.Parallel()
 
@@ -146,17 +147,17 @@ func TestServerResourceUpdateResizesVolumeInPlace(t *testing.T) {
 
 	resize := findRequest(recorded, http.MethodPost, "/v1/servers/jG4bZNnE8zKYx7LP/resize")
 	if assert.NotNil(t, resize, "expected a resize call, got: %v", recorded) {
-		// El flavor no cambia, así que se omite para que la API no lo toque.
+		// The flavor does not change, so it is omitted to keep the API off it.
 		assert.JSONEq(t, `{"volumeSizeGb":50}`, resize.body)
 	}
-	// Sin cambio de nombre no hay que llamar al rename.
+	// With no name change there is no reason to call rename.
 	assert.Nil(t, findRequest(recorded, http.MethodPatch, "/v1/servers/jG4bZNnE8zKYx7LP/rename"))
-	// Y hay que esperar a que la acción asíncrona termine antes de dar el apply por bueno.
+	// And the async action has to complete before the apply is called done.
 	assert.NotNil(t, findRequest(recorded, http.MethodGet, "/v1/actions/awqYZWO4njxQyOV0"))
 }
 
-// El mismo endpoint cambia CPU/RAM, así que el flavor también se redimensiona
-// sin recrear el servidor.
+// The same endpoint changes CPU/RAM, so the flavor is resized without recreating
+// the server either.
 func TestServerResourceUpdateResizesFlavorInPlace(t *testing.T) {
 	t.Parallel()
 
@@ -170,7 +171,7 @@ func TestServerResourceUpdateResizesFlavorInPlace(t *testing.T) {
 	}
 }
 
-// Cambiar flavor y disco a la vez es una sola llamada, no dos.
+// Changing flavor and volume at once is a single call, not two.
 func TestServerResourceUpdateResizesFlavorAndVolumeTogether(t *testing.T) {
 	t.Parallel()
 
@@ -188,8 +189,7 @@ func TestServerResourceUpdateResizesFlavorAndVolumeTogether(t *testing.T) {
 	assert.Equal(t, 1, resizeCalls, fmt.Sprintf("expected exactly one resize call, got: %v", recorded))
 }
 
-// El rename sigue funcionando y, si solo cambia el nombre, no se dispara ningún
-// resize.
+// Rename still works, and when only the name changes no resize fires.
 func TestServerResourceUpdateRenamesWithoutResizing(t *testing.T) {
 	t.Parallel()
 
@@ -199,14 +199,14 @@ func TestServerResourceUpdateRenamesWithoutResizing(t *testing.T) {
 
 	rename := findRequest(recorded, http.MethodPatch, "/v1/servers/jG4bZNnE8zKYx7LP/rename")
 	if assert.NotNil(t, rename, "expected a rename call, got: %v", recorded) {
-		// El payload del rename arrastra campos vacíos del struct Server (image,
-		// cost, action); lo que importa es que lleve el nombre nuevo.
+		// The rename payload drags empty fields along from the Server struct (image,
+		// cost, action); what matters is that it carries the new name.
 		assert.Contains(t, rename.body, `"newServerName":"kaito-nuevo"`)
 	}
 	assert.Nil(t, findRequest(recorded, http.MethodPost, "/v1/servers/jG4bZNnE8zKYx7LP/resize"))
 }
 
-// Sin cambios de nombre, flavor ni disco, Update no debe tocar la API.
+// With no change to name, flavor or volume, Update must not touch the API.
 func TestServerResourceUpdateWithoutChangesCallsNothing(t *testing.T) {
 	t.Parallel()
 

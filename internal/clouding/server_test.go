@@ -336,8 +336,8 @@ func TestResizeServer(t *testing.T) {
 	assert.Equal(t, "server", action.ResourceType)
 }
 
-// Solo el disco: el flavor omitido debe desaparecer del cuerpo, porque la API
-// interpreta el campo ausente como "no cambies el flavor".
+// Volume only: the omitted flavor must disappear from the body, because the API
+// reads an absent field as "leave the flavor alone".
 func TestResizeServerOnlyVolume(t *testing.T) {
 	t.Parallel()
 	var gotBody string
@@ -369,8 +369,8 @@ func TestResizeServerOnlyVolume(t *testing.T) {
 	assert.JSONEq(t, `{"volumeSizeGb":50}`, gotBody)
 }
 
-// Un 400 de validación (p. ej. tamaño menor que el actual) debe llegar al
-// usuario con el detalle de la API, no como un error genérico.
+// A validation 400 (e.g. a size below the current one) must reach the user with
+// the API's own detail, not as a generic error.
 func TestResizeServerValidationError(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

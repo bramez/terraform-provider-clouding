@@ -502,9 +502,9 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	// El estado previo es necesario para saber qué ha cambiado de verdad: el
-	// rename y el resize son endpoints distintos y cada uno solo debe dispararse
-	// cuando su atributo cambia.
+	// The prior state is what tells us what actually changed: rename and resize
+	// are different endpoints, and each one must only fire when its own attribute
+	// changes.
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 
 	if resp.Diagnostics.HasError() {
@@ -519,9 +519,9 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	// El flavor y el tamaño del disco se cambian in-place con un único resize.
-	// Cada campo se manda solo si ha cambiado: el campo ausente le dice a la API
-	// que deje ese recurso como está.
+	// The flavor and the volume size are changed in place with a single resize.
+	// Each field is sent only when it changed: an absent field tells the API to
+	// leave that resource as it is.
 	resizeRequest := clouding.ResizeServerRequest{}
 	if !plan.FlavorID.Equal(state.FlavorID) {
 		resizeRequest.FlavorID = plan.FlavorID.ValueString()
@@ -536,8 +536,8 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to resize server, got error: %s", err))
 			return
 		}
-		// El resize es asíncrono: sin esperar la acción, el apply terminaría
-		// antes de que el servidor tenga el tamaño nuevo.
+		// The resize is async: without waiting for the action, the apply would
+		// finish before the server actually has its new size.
 		err = r.client.WaitForAction(ctx, &action, 5*time.Second)
 		if err != nil {
 			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to wait for server resize action, got error: %s", err))

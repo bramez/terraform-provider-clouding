@@ -7,19 +7,19 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 )
 
-// volumeShrinkGuard rechaza en tiempo de plan cualquier reducción del tamaño del
-// disco. El endpoint POST servers/{id}/resize de Clouding solo permite crecer
-// ("the volume size must be equal or greater than the current"), así que sin este
-// guard el usuario vería un plan aparentemente válido que revienta con un 400 a
-// mitad del apply. Es un plan modifier y no un validator porque necesita comparar
-// contra el estado previo, que los validators no reciben.
+// volumeShrinkGuard rejects any reduction of the volume size at plan time.
+// Clouding's POST servers/{id}/resize endpoint can only grow a volume ("the volume
+// size must be equal or greater than the current"), so without this guard the user
+// would get an apparently valid plan that blows up with a 400 half way through the
+// apply. It is a plan modifier rather than a validator because it needs to compare
+// against the prior state, which validators do not receive.
 type volumeShrinkGuard struct{}
 
 // Ensure the plan modifier satisfies the framework interface.
 var _ planmodifier.Int64 = volumeShrinkGuard{}
 
 func (m volumeShrinkGuard) Description(ctx context.Context) string {
-	return "El tamaño del disco solo puede crecer; reducirlo se rechaza en el plan."
+	return "The volume size can only grow; shrinking it is rejected at plan time."
 }
 
 func (m volumeShrinkGuard) MarkdownDescription(ctx context.Context) string {
@@ -27,8 +27,8 @@ func (m volumeShrinkGuard) MarkdownDescription(ctx context.Context) string {
 }
 
 func (m volumeShrinkGuard) PlanModifyInt64(ctx context.Context, req planmodifier.Int64Request, resp *planmodifier.Int64Response) {
-	// Sin estado previo (creación) o con un valor todavía sin resolver no hay
-	// nada que comparar.
+	// With no prior state (creation) or an unresolved value there is nothing to
+	// compare against.
 	if req.StateValue.IsNull() || req.StateValue.IsUnknown() {
 		return
 	}
@@ -44,13 +44,13 @@ func (m volumeShrinkGuard) PlanModifyInt64(ctx context.Context, req planmodifier
 
 	resp.Diagnostics.AddAttributeError(
 		req.Path,
-		"El disco no se puede reducir",
+		"Volume cannot be shrunk",
 		fmt.Sprintf(
-			"El servidor tiene un disco de %d GB y la configuración pide %d GB. "+
-				"La API de Clouding solo permite hacer crecer el volumen. "+
-				"Si de verdad quieres un disco menor hay que recrear el servidor "+
-				"de forma explícita (`terraform apply -replace=...`), asumiendo la "+
-				"pérdida de los datos del disco actual.",
+			"The server has a %d GB volume and the configuration asks for %d GB. "+
+				"The Clouding API can only grow a volume. If you really want a "+
+				"smaller disk, the server has to be recreated explicitly "+
+				"(`terraform apply -replace=...`), accepting the loss of the data "+
+				"on the current volume.",
 			current, desired,
 		),
 	)

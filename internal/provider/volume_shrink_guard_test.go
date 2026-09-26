@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// La API de Clouding solo sabe hacer crecer el disco, así que reducir el tamaño
-// tiene que fallar en `terraform plan` con un mensaje claro, en vez de mandar a
-// la API una petición que siempre devolverá 400.
+// The Clouding API can only grow a volume, so a smaller size has to fail in
+// `terraform plan` with a clear message, instead of sending the API a request that
+// will always come back as a 400.
 func TestVolumeShrinkGuard(t *testing.T) {
 	t.Parallel()
 
@@ -21,16 +21,16 @@ func TestVolumeShrinkGuard(t *testing.T) {
 		plan        types.Int64
 		expectError bool
 	}{
-		"crecer":                {state: types.Int64Value(40), plan: types.Int64Value(50), expectError: false},
-		"mismo tamaño":          {state: types.Int64Value(40), plan: types.Int64Value(40), expectError: false},
-		"encoger":               {state: types.Int64Value(50), plan: types.Int64Value(40), expectError: true},
-		"creación (sin estado)": {state: types.Int64Null(), plan: types.Int64Value(50), expectError: false},
-		"plan desconocido":      {state: types.Int64Value(40), plan: types.Int64Unknown(), expectError: false},
+		"grow":              {state: types.Int64Value(40), plan: types.Int64Value(50), expectError: false},
+		"same size":         {state: types.Int64Value(40), plan: types.Int64Value(40), expectError: false},
+		"shrink":            {state: types.Int64Value(50), plan: types.Int64Value(40), expectError: true},
+		"create (no state)": {state: types.Int64Null(), plan: types.Int64Value(50), expectError: false},
+		"unknown plan":      {state: types.Int64Value(40), plan: types.Int64Unknown(), expectError: false},
 	}
 
 	for name, test := range tests {
-		// Go 1.21 comparte la variable de bucle entre iteraciones, y con
-		// t.Parallel() los subtests la leerían ya sobrescrita.
+		// Go 1.21 shares the loop variable across iterations, and with t.Parallel()
+		// the subtests would read it already overwritten.
 		name, test := name, test
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -48,7 +48,7 @@ func TestVolumeShrinkGuard(t *testing.T) {
 				assert.Contains(t, response.Diagnostics.Errors()[0].Detail(), "40")
 				assert.Contains(t, response.Diagnostics.Errors()[0].Detail(), "50")
 			}
-			// El modificador nunca reescribe el plan, solo lo valida.
+			// The modifier never rewrites the plan, it only validates it.
 			assert.Equal(t, test.plan, response.PlanValue)
 		})
 	}

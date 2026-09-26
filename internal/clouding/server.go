@@ -196,17 +196,17 @@ func (a *API) UpdateServerName(id, name string) error {
 	return nil
 }
 
-// ResizeServerRequest es el cuerpo de POST servers/{id}/resize. Los dos campos
-// son opcionales y se omiten cuando van vacíos: el campo ausente le dice a la
-// API que no toque ese recurso. El disco solo puede crecer — la API rechaza con
-// un 400 cualquier tamaño menor que el actual.
+// ResizeServerRequest is the body of POST servers/{id}/resize. Both fields are
+// optional and omitted when empty: an absent field tells the API to leave that
+// resource untouched. The volume can only grow — the API answers 400 to any size
+// below the current one.
 type ResizeServerRequest struct {
 	FlavorID     string `json:"flavorId,omitempty"`
 	VolumeSizeGb int64  `json:"volumeSizeGb,omitempty"`
 }
 
-// ResizeServer cambia el flavor y/o el tamaño del disco del servidor sin
-// destruirlo. Devuelve la acción asíncrona que hay que esperar con WaitForAction.
+// ResizeServer changes the server's flavor and/or volume size without
+// destroying it. It returns the async action to wait on with WaitForAction.
 func (a *API) ResizeServer(id string, request ResizeServerRequest) (Action, error) {
 	var action Action
 
