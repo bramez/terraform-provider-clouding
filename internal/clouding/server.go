@@ -195,3 +195,45 @@ func (a *API) UpdateServerName(id, name string) error {
 
 	return nil
 }
+
+// ResizeServerRequest es el cuerpo de POST servers/{id}/resize. Los dos campos
+// son opcionales y se omiten cuando van vacíos: el campo ausente le dice a la
+// API que no toque ese recurso. El disco solo puede crecer — la API rechaza con
+// un 400 cualquier tamaño menor que el actual.
+type ResizeServerRequest struct {
+	FlavorID     string `json:"flavorId,omitempty"`
+	VolumeSizeGb int64  `json:"volumeSizeGb,omitempty"`
+}
+
+// ResizeServer cambia el flavor y/o el tamaño del disco del servidor sin
+// destruirlo. Devuelve la acción asíncrona que hay que esperar con WaitForAction.
+func (a *API) ResizeServer(id string, request ResizeServerRequest) (Action, error) {
+	var action Action
+
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		return action, fmt.Errorf("error marshaling resize request: %s", err)
+	}
+
+	response, err := a.sendRequest(http.MethodPost, fmt.Sprintf("%s/%s/resize", SERVER_PATH, id), requestJSON)
+	if err != nil {
+		return action, fmt.Errorf("getting error from sendRequest: %s", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		var errorResponse ErrorResponse
+		err = json.NewDecoder(response.Body).Decode(&errorResponse)
+		if err != nil {
+			return action, fmt.Errorf("error decoding error response: %s", err)
+		}
+		return action, fmt.Errorf("error resizing server, status code: %d, title: %s, detail: %s, validation errors: %s", errorResponse.Status, errorResponse.Title, errorResponse.Detail, errorResponse.ValidationErrors())
+	}
+
+	err = json.NewDecoder(response.Body).Decode(&action)
+	if err != nil {
+		return action, fmt.Errorf("error decoding action: %s", err)
+	}
+
+	return action, nil
+}
