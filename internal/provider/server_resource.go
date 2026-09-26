@@ -108,11 +108,8 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				},
 			},
 			"flavor_id": schema.StringAttribute{
-				MarkdownDescription: "The identifier of the desired flavor size. Flavors are pre-defined configurations of CPU and RAM. The list of available flavors can be retrieved from the [flavor sizes](https://api.clouding.io/docs#tag/Sizes/operation/ListAllFlavors) endpoint.",
+				MarkdownDescription: "The identifier of the desired flavor size. Flavors are pre-defined configurations of CPU and RAM. The list of available flavors can be retrieved from the [flavor sizes](https://api.clouding.io/docs#tag/Sizes/operation/ListAllFlavors) endpoint. Changing it resizes the server in place.",
 				Required:            true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"firewall_id": schema.StringAttribute{
 				MarkdownDescription: "The identifier of the initial firewall that will be attached to the server. Firewalls can be attached or detached after server creation.",
@@ -182,13 +179,14 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 					},
 					"ssd_gb": schema.Int64Attribute{
 						MarkdownDescription: "Minimum: >=5" +
-							"The size of the volume in gigabytes. The minimum size depends on the source. For example if the source is snapshot and the snapshot is 20 gigabytes, this property should be set to minimum 20 gigabytes. The list of available volume sizes can be retrieved from the volume sizes endpoint.",
+							"The size of the volume in gigabytes. The minimum size depends on the source. For example if the source is snapshot and the snapshot is 20 gigabytes, this property should be set to minimum 20 gigabytes. The list of available volume sizes can be retrieved from the volume sizes endpoint. " +
+							"Increasing it resizes the volume in place, without recreating the server. The Clouding API cannot shrink a volume, so a smaller size is rejected at plan time.",
 						Required: true,
 						Validators: []validator.Int64{
 							int64validator.AtLeast(5),
 						},
 						PlanModifiers: []planmodifier.Int64{
-							int64planmodifier.RequiresReplace(),
+							volumeShrinkGuard{},
 						},
 					},
 				},
@@ -500,21 +498,53 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 }
 
 func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan ServerResourceModel
+	var plan, state ServerResourceModel
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	// El estado previo es necesario para saber qué ha cambiado de verdad: el
+	// rename y el resize son endpoints distintos y cada uno solo debe dispararse
+	// cuando su atributo cambia.
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Update Server on the Clouding API
-	err := r.client.UpdateServerName(plan.Id.ValueString(), plan.Name.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to update server, got error: %s", err))
-		return
+	if !plan.Name.Equal(state.Name) {
+		err := r.client.UpdateServerName(plan.Id.ValueString(), plan.Name.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to update server, got error: %s", err))
+			return
+		}
 	}
+
+	// El flavor y el tamaño del disco se cambian in-place con un único resize.
+	// Cada campo se manda solo si ha cambiado: el campo ausente le dice a la API
+	// que deje ese recurso como está.
+	resizeRequest := clouding.ResizeServerRequest{}
+	if !plan.FlavorID.Equal(state.FlavorID) {
+		resizeRequest.FlavorID = plan.FlavorID.ValueString()
+	}
+	if plan.Volume != nil && state.Volume != nil && !plan.Volume.SsdGB.Equal(state.Volume.SsdGB) {
+		resizeRequest.VolumeSizeGb = plan.Volume.SsdGB.ValueInt64()
+	}
+
+	if resizeRequest != (clouding.ResizeServerRequest{}) {
+		action, err := r.client.ResizeServer(plan.Id.ValueString(), resizeRequest)
+		if err != nil {
+			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to resize server, got error: %s", err))
+			return
+		}
+		// El resize es asíncrono: sin esperar la acción, el apply terminaría
+		// antes de que el servidor tenga el tamaño nuevo.
+		err = r.client.WaitForAction(ctx, &action, 5*time.Second)
+		if err != nil {
+			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to wait for server resize action, got error: %s", err))
+			return
+		}
+	}
+
 	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
 
 	// Save updated data into Terraform state

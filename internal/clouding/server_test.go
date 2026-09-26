@@ -1,6 +1,7 @@
 package clouding
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -282,4 +283,119 @@ func TestDeleteServer(t *testing.T) {
 	assert.Equal(t, "", action.CompletedAt)
 	assert.Equal(t, "7y1OZWl2ZE9mk6l3", action.ResourceID)
 	assert.Equal(t, "server", action.ResourceType)
+}
+
+func TestResizeServer(t *testing.T) {
+	t.Parallel()
+	var gotMethod, gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("error reading request body: %s", err)
+		}
+		gotBody = string(body)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, err = w.Write([]byte(`
+		{
+		  "id": "awqYZWO4njxQyOV0",
+		  "status": "inProgress",
+		  "type": "resize",
+		  "startedAt": "2023-01-03T12:00:00.0000000Z",
+		  "completedAt": null,
+		  "resourceId": "7y1OZWl2ZE9mk6l3",
+		  "resourceType": "server"
+		}
+		`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	action, err := client.ResizeServer("7y1OZWl2ZE9mk6l3", ResizeServerRequest{FlavorID: "2x8", VolumeSizeGb: 50})
+	if err != nil {
+		t.Errorf("getting error calling ResizeServer: %s", err)
+	}
+
+	assert.Equal(t, http.MethodPost, gotMethod)
+	assert.Equal(t, "/v1/servers/7y1OZWl2ZE9mk6l3/resize", gotPath)
+	assert.JSONEq(t, `{"flavorId":"2x8","volumeSizeGb":50}`, gotBody)
+
+	assert.Equal(t, "awqYZWO4njxQyOV0", action.ID)
+	assert.Equal(t, "inProgress", action.Status)
+	assert.Equal(t, "resize", action.Type)
+	assert.Equal(t, "7y1OZWl2ZE9mk6l3", action.ResourceID)
+	assert.Equal(t, "server", action.ResourceType)
+}
+
+// Solo el disco: el flavor omitido debe desaparecer del cuerpo, porque la API
+// interpreta el campo ausente como "no cambies el flavor".
+func TestResizeServerOnlyVolume(t *testing.T) {
+	t.Parallel()
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("error reading request body: %s", err)
+		}
+		gotBody = string(body)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, err = w.Write([]byte(`{"id":"awqYZWO4njxQyOV0","status":"pending","type":"resize"}`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	_, err = client.ResizeServer("7y1OZWl2ZE9mk6l3", ResizeServerRequest{VolumeSizeGb: 50})
+	if err != nil {
+		t.Errorf("getting error calling ResizeServer: %s", err)
+	}
+
+	assert.JSONEq(t, `{"volumeSizeGb":50}`, gotBody)
+}
+
+// Un 400 de validación (p. ej. tamaño menor que el actual) debe llegar al
+// usuario con el detalle de la API, no como un error genérico.
+func TestResizeServerValidationError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, err := w.Write([]byte(`
+		{
+		  "title": "One or more validation errors occurred.",
+		  "status": 400,
+		  "detail": "The volume size must be equal or greater than the current.",
+		  "errors": {"volumeSizeGb": ["Invalid size"]}
+		}
+		`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	_, err = client.ResizeServer("7y1OZWl2ZE9mk6l3", ResizeServerRequest{VolumeSizeGb: 5})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "The volume size must be equal or greater than the current.")
+	assert.Contains(t, err.Error(), "volumeSizeGb")
 }
