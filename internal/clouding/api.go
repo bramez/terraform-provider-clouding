@@ -3,6 +3,7 @@ package clouding
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -11,6 +12,13 @@ const (
 	ENDPOINT = "https://api.clouding.io"
 	VERSION  = "v1"
 )
+
+// ErrNotFound reports that the API answered 404 to a lookup by id: the resource
+// is gone. The getters behind a resource Read wrap it so that Read can drop the
+// resource from state instead of failing, which is what Terraform expects when
+// something was deleted outside Terraform. Any other non-2xx stays a plain
+// error, so a transient 500 or a bad token never wipes state.
+var ErrNotFound = errors.New("resource not found")
 
 type API struct {
 	Endpoint string

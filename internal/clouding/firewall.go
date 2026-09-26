@@ -56,6 +56,9 @@ func (a *API) GetFirewallID(id string) (Firewall, error) {
 		if err != nil {
 			return firewall, fmt.Errorf("error decoding error response: %s", err)
 		}
+		if response.StatusCode == http.StatusNotFound {
+			return firewall, fmt.Errorf("error getting firewall: %s: %w", errorResponse.Title, ErrNotFound)
+		}
 		return firewall, fmt.Errorf("error getting firewall: %s", errorResponse.Title)
 	}
 
@@ -151,6 +154,9 @@ func (a *API) GetFirewallRule(id string) (FirewallRuleID, error) {
 		err = json.NewDecoder(response.Body).Decode(&errorResponse)
 		if err != nil {
 			return firewallRuleID, fmt.Errorf("error decoding error response: %s", err)
+		}
+		if response.StatusCode == http.StatusNotFound {
+			return firewallRuleID, fmt.Errorf("error getting firewall rule, status code: %d, title: %s: %w", errorResponse.Status, errorResponse.Title, ErrNotFound)
 		}
 		return firewallRuleID, fmt.Errorf("error getting firewall rule, status code: %d, title: %s", errorResponse.Status, errorResponse.Title)
 	}

@@ -33,6 +33,9 @@ func (a *API) GetSshKeyID(id string) (SshKey, error) {
 		if err != nil {
 			return sshKey, fmt.Errorf("error decoding error response: %s", err)
 		}
+		if response.StatusCode == http.StatusNotFound {
+			return sshKey, fmt.Errorf("error getting sshkey, status code: %d, title: %s: %w", errorResponse.Status, errorResponse.Title, ErrNotFound)
+		}
 		return sshKey, fmt.Errorf("error getting sshkey, status code: %d, title: %s", errorResponse.Status, errorResponse.Title)
 	}
 

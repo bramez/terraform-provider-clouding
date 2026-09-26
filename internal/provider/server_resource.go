@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -445,6 +446,12 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 	err := r.client.GetServerID(&server)
 	if err != nil {
+		if errors.Is(err, clouding.ErrNotFound) {
+			// Deleted outside Terraform: drop it from state so the next plan
+			// schedules it for creation, instead of aborting the refresh.
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read server, got error: %s", err))
 		return
 	}

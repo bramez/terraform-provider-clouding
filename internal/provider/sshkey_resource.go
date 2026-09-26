@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -175,6 +176,12 @@ func (r *SshKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	sshKey, err := r.client.GetSshKeyID(state.Id.ValueString())
 	if err != nil {
+		if errors.Is(err, clouding.ErrNotFound) {
+			// Deleted outside Terraform: drop it from state so the next plan
+			// schedules it for creation, instead of aborting the refresh.
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError(
 			"Clouding Client Error",
 			fmt.Sprintf("Unable to read ssh key id, got error:  %s", err),

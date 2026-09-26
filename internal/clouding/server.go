@@ -85,6 +85,9 @@ func (a *API) GetServerID(server *Server) error {
 		if err != nil {
 			return fmt.Errorf("error decoding error response: %s", err)
 		}
+		if response.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("error getting server: %s: %w", errorResponse.Detail, ErrNotFound)
+		}
 		return fmt.Errorf("error getting server: %s", errorResponse.Detail)
 	}
 

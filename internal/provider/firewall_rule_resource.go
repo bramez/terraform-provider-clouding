@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bramez/terraform-provider-clouding/internal/clouding"
@@ -186,6 +187,12 @@ func (r *FirewallRuleResource) Read(ctx context.Context, req resource.ReadReques
 
 	firewallRule, err := r.client.GetFirewallRule(state.Id.ValueString())
 	if err != nil {
+		if errors.Is(err, clouding.ErrNotFound) {
+			// Deleted outside Terraform: drop it from state so the next plan
+			// schedules it for creation, instead of aborting the refresh.
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Clouding Client Error", fmt.Sprintf("Unable to read firewall id, got error: %s", err))
 		return
 	}
