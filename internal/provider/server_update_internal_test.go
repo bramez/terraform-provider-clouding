@@ -73,16 +73,25 @@ func serverValue(name, flavorID string, ssdGB int64) tftypes.Value {
 	})
 }
 
+// The prior state every test starts from: the server as Clouding reports it
+// before the change under test. It is fixed so that each test only has to state
+// what it changes.
+const (
+	priorName   = "kaito"
+	priorFlavor = "2x8"
+	priorSSD    = 40
+)
+
 type recordedRequest struct {
 	method string
 	path   string
 	body   string
 }
 
-// updateServer runs Update() with the given prior state (stateName/stateFlavor/stateSSD)
-// and desired plan against a fake HTTP server, and returns the requests the provider
-// issued to the API.
-func updateServer(t *testing.T, stateName, stateFlavor string, stateSSD int64, planName, planFlavor string, planSSD int64) (*resource.UpdateResponse, []recordedRequest) {
+// updateServer runs Update() against a fake HTTP server, going from the fixed
+// prior state to the given plan, and returns the requests the provider issued to
+// the API.
+func updateServer(t *testing.T, planName, planFlavor string, planSSD int64) (*resource.UpdateResponse, []recordedRequest) {
 	t.Helper()
 
 	var recorded []recordedRequest
@@ -117,7 +126,7 @@ func updateServer(t *testing.T, stateName, stateFlavor string, stateSSD int64, p
 	schemaResp := &resource.SchemaResponse{}
 	r.Schema(context.Background(), resource.SchemaRequest{}, schemaResp)
 
-	state := tfsdk.State{Schema: schemaResp.Schema, Raw: serverValue(stateName, stateFlavor, stateSSD)}
+	state := tfsdk.State{Schema: schemaResp.Schema, Raw: serverValue(priorName, priorFlavor, priorSSD)}
 	plan := tfsdk.Plan{Schema: schemaResp.Schema, Raw: serverValue(planName, planFlavor, planSSD)}
 
 	resp := &resource.UpdateResponse{State: state}
@@ -141,7 +150,7 @@ func findRequest(recorded []recordedRequest, method, path string) *recordedReque
 func TestServerResourceUpdateResizesVolumeInPlace(t *testing.T) {
 	t.Parallel()
 
-	resp, recorded := updateServer(t, "kaito", "2x8", 40, "kaito", "2x8", 50)
+	resp, recorded := updateServer(t, priorName, priorFlavor, 50)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 
@@ -161,7 +170,7 @@ func TestServerResourceUpdateResizesVolumeInPlace(t *testing.T) {
 func TestServerResourceUpdateResizesFlavorInPlace(t *testing.T) {
 	t.Parallel()
 
-	resp, recorded := updateServer(t, "kaito", "2x8", 40, "kaito", "4x16", 40)
+	resp, recorded := updateServer(t, priorName, "4x16", priorSSD)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 
@@ -175,7 +184,7 @@ func TestServerResourceUpdateResizesFlavorInPlace(t *testing.T) {
 func TestServerResourceUpdateResizesFlavorAndVolumeTogether(t *testing.T) {
 	t.Parallel()
 
-	resp, recorded := updateServer(t, "kaito", "2x8", 40, "kaito", "4x16", 50)
+	resp, recorded := updateServer(t, priorName, "4x16", 50)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 
@@ -193,7 +202,7 @@ func TestServerResourceUpdateResizesFlavorAndVolumeTogether(t *testing.T) {
 func TestServerResourceUpdateRenamesWithoutResizing(t *testing.T) {
 	t.Parallel()
 
-	resp, recorded := updateServer(t, "kaito", "2x8", 40, "kaito-nuevo", "2x8", 40)
+	resp, recorded := updateServer(t, "kaito-renamed", priorFlavor, priorSSD)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 
@@ -201,7 +210,7 @@ func TestServerResourceUpdateRenamesWithoutResizing(t *testing.T) {
 	if assert.NotNil(t, rename, "expected a rename call, got: %v", recorded) {
 		// The rename payload drags empty fields along from the Server struct (image,
 		// cost, action); what matters is that it carries the new name.
-		assert.Contains(t, rename.body, `"newServerName":"kaito-nuevo"`)
+		assert.Contains(t, rename.body, `"newServerName":"kaito-renamed"`)
 	}
 	assert.Nil(t, findRequest(recorded, http.MethodPost, "/v1/servers/jG4bZNnE8zKYx7LP/resize"))
 }
@@ -210,7 +219,7 @@ func TestServerResourceUpdateRenamesWithoutResizing(t *testing.T) {
 func TestServerResourceUpdateWithoutChangesCallsNothing(t *testing.T) {
 	t.Parallel()
 
-	resp, recorded := updateServer(t, "kaito", "2x8", 40, "kaito", "2x8", 40)
+	resp, recorded := updateServer(t, priorName, priorFlavor, priorSSD)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 	assert.Empty(t, recorded, "expected no API calls")
