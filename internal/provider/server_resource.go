@@ -452,14 +452,12 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	state.Name = types.StringValue(server.Name)
 	state.Hostname = types.StringValue(server.Hostname)
 	state.FlavorID = types.StringValue(server.FlavorID)
-	// GET servers/{id} reports an empty firewall list even for a server that has
-	// one applied, so refreshing the attribute out of an empty response would
-	// overwrite a perfectly good id with "". That shows up as a fake diff against
-	// the configuration and, since firewall_id requires replacement, it turns any
-	// unrelated change into a destroy and create. A firewall the API does report
-	// still wins, so a firewall swapped outside Terraform is detected as drift.
-	if server.FirewallID != "" {
-		state.FirewallID = types.StringValue(server.FirewallID)
+	// A server with no firewall reported anywhere is no information rather than a
+	// removed firewall, so the id in state stands: overwriting it with "" showed up
+	// as a fake diff and, since firewall_id requires replacement, turned any
+	// unrelated change into a destroy and create.
+	if reported := firewallIDToReport(state.FirewallID.ValueString(), server.Firewalls); reported != "" {
+		state.FirewallID = types.StringValue(reported)
 	}
 	if server.AccessConfiguration != nil {
 		// Same reasoning as in Create: the API does not return the password, so
@@ -626,4 +624,22 @@ func (r *ServerResource) Delete(ctx context.Context, req resource.DeleteRequest,
 
 func (r *ServerResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// firewallIDToReport picks the firewall to refresh into state out of the ones the
+// API reports as attached. The resource models a single firewall_id — the one
+// attached at creation — while a port can carry several, so the id already known is
+// kept whenever it is still attached; anything else is drift and reports the first
+// one. No firewall reported at all means no information, and the caller keeps what
+// state has.
+func firewallIDToReport(current string, attached []clouding.Firewall) string {
+	for _, firewall := range attached {
+		if firewall.ID == current {
+			return current
+		}
+	}
+	if len(attached) > 0 {
+		return attached[0].ID
+	}
+	return ""
 }

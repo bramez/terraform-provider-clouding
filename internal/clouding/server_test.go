@@ -541,3 +541,91 @@ func TestConfigureBackupsIsANoOpWhenNothingChanges(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, action.ID, "a no-op leaves no action to wait for")
 }
+
+// The firewalls array of a server is deprecated and, in the API's own words, "no
+// longer populated": firewalls now hang off each public port, and the ones
+// previously attached to the server were applied to all of them. Reading the
+// deprecated field alone left FirewallID empty, which the resource then took for a
+// removed firewall.
+func TestGetServerIDReadsFirewallFromPublicPorts(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte(`
+		{
+		  "id": "AE1GadQ4ypM24kzp",
+		  "name": "kaito",
+		  "flavor": "2x8",
+		  "volumeSizeGb": 50,
+		  "image": {"id": "jG4bZNnE8zKYx7LP"},
+		  "firewalls": [],
+		  "publicPorts": [
+		    {
+		      "id": "wa7BmZXbaZ9e2Mjn",
+		      "ipAddress": "200.234.228.186",
+		      "firewalls": [
+		        {"id": "BojVWnrDJ9d0wavR", "name": "cravilab-prod"},
+		        {"id": "JLB82xyP8aWOrqeN", "name": "Allow MySQL"}
+		      ]
+		    }
+		  ]
+		}
+		`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	server := Server{ID: "AE1GadQ4ypM24kzp", Volume: &Volume{}}
+	err = client.GetServerID(&server)
+	if err != nil {
+		t.Errorf("getting error calling GetServerID: %s", err)
+	}
+
+	// Every firewall of every port is reported, so the caller can tell whether the
+	// one it knows about is still attached.
+	assert.Len(t, server.Firewalls, 2)
+	assert.Equal(t, "BojVWnrDJ9d0wavR", server.Firewalls[0].ID)
+	assert.Equal(t, "JLB82xyP8aWOrqeN", server.Firewalls[1].ID)
+	assert.Equal(t, "BojVWnrDJ9d0wavR", server.FirewallID)
+}
+
+// A server with no port and no firewall must not report one, and must not panic.
+func TestGetServerIDWithoutFirewallsAnywhere(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte(`
+		{
+		  "id": "AE1GadQ4ypM24kzp",
+		  "flavor": "2x8",
+		  "volumeSizeGb": 50,
+		  "image": {"id": "jG4bZNnE8zKYx7LP"},
+		  "firewalls": [],
+		  "publicPorts": [{"id": "wa7BmZXbaZ9e2Mjn", "firewalls": []}]
+		}
+		`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	server := Server{ID: "AE1GadQ4ypM24kzp", Volume: &Volume{}}
+	err = client.GetServerID(&server)
+
+	assert.NoError(t, err)
+	assert.Empty(t, server.Firewalls)
+	assert.Empty(t, server.FirewallID)
+}

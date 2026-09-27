@@ -14,17 +14,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// readServer runs Read() against a fake API reporting the given firewalls,
-// starting from the prior state with no backup strategy.
-func readServer(t *testing.T, firewalls string) (*resource.ReadResponse, ServerResourceModel) {
+// readServer runs Read() against a fake API whose public port reports the given
+// firewalls, starting from the prior state with no backup strategy.
+func readServer(t *testing.T, portFirewalls string) (*resource.ReadResponse, ServerResourceModel) {
 	t.Helper()
 
-	return readServerFrom(t, serverValue(priorName, priorFlavor, priorSSD), firewalls, `null`)
+	return readServerFrom(t, serverValue(priorName, priorFlavor, priorSSD), portFirewalls, `null`)
 }
 
 // readServerFrom is the same for the cases that need a different prior state or a
 // backup strategy in the API response.
-func readServerFrom(t *testing.T, stateRaw tftypes.Value, firewalls, backups string) (*resource.ReadResponse, ServerResourceModel) {
+func readServerFrom(t *testing.T, stateRaw tftypes.Value, portFirewalls, backups string) (*resource.ReadResponse, ServerResourceModel) {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -42,10 +42,11 @@ func readServerFrom(t *testing.T, stateRaw tftypes.Value, firewalls, backups str
 		  "powerState": "Running",
 		  "publicIp": "200.234.228.186",
 		  "accessConfiguration": {"sshKeyId": "MJpLa2W4PodQ9YOX", "savePassword": false},
-		  "firewalls": %s,
+		  "firewalls": [],
+		  "publicPorts": [{"id": "wa7BmZXbaZ9e2Mjn", "firewalls": %s}],
 		  "backupPreferences": %s
 		}
-		`, firewalls, backups)))
+		`, portFirewalls, backups)))
 		if err != nil {
 			t.Errorf("error writing the response: %s", err)
 		}
@@ -83,8 +84,8 @@ func TestServerResourceReadKeepsFirewallWhenApiReportsNone(t *testing.T) {
 	assert.Equal(t, priorFirewall, refreshed.FirewallID.ValueString())
 }
 
-// A firewall reported by the API still wins, so a firewall swapped outside
-// Terraform is detected as drift instead of being hidden.
+// A different firewall on the port is real drift — swapped outside Terraform — and
+// must be reported as such.
 func TestServerResourceReadTakesFirewallReportedByApi(t *testing.T) {
 	t.Parallel()
 
@@ -137,4 +138,19 @@ func TestServerResourceReadTakesBackupsReportedByApi(t *testing.T) {
 		assert.Equal(t, int64(14), refreshed.BackupPreference.Slots.ValueInt64())
 		assert.Equal(t, "twoDays", refreshed.BackupPreference.Frequency.ValueString())
 	}
+}
+
+// A public port can carry several firewalls, and the resource models a single one:
+// the one attached at creation. So when the firewall already in state is still
+// among them, it is the one to report — picking the first would invent drift.
+func TestServerResourceReadKeepsItsOwnFirewallAmongSeveral(t *testing.T) {
+	t.Parallel()
+
+	resp, refreshed := readServer(t, `[
+		{"id": "JLB82xyP8aWOrqeN", "name": "Allow MySQL"},
+		{"id": "`+priorFirewall+`", "name": "cravilab-prod"}
+	]`)
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+	assert.Equal(t, priorFirewall, refreshed.FirewallID.ValueString())
 }
