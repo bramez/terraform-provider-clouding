@@ -459,7 +459,15 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	state.Name = types.StringValue(server.Name)
 	state.Hostname = types.StringValue(server.Hostname)
 	state.FlavorID = types.StringValue(server.FlavorID)
-	state.FirewallID = types.StringValue(server.FirewallID)
+	// GET servers/{id} reports an empty firewall list even for a server that has
+	// one applied, so refreshing the attribute out of an empty response would
+	// overwrite a perfectly good id with "". That shows up as a fake diff against
+	// the configuration and, since firewall_id requires replacement, it turns any
+	// unrelated change into a destroy and create. A firewall the API does report
+	// still wins, so a firewall swapped outside Terraform is detected as drift.
+	if server.FirewallID != "" {
+		state.FirewallID = types.StringValue(server.FirewallID)
+	}
 	if server.AccessConfiguration != nil {
 		// Same reasoning as in Create: the API does not return the password, so
 		// refreshing it from the response would replace a null with "" and show

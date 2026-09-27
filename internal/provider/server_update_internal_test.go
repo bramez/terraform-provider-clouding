@@ -53,7 +53,7 @@ func serverValue(name, flavorID string, ssdGB int64) tftypes.Value {
 		"name":        tftypes.NewValue(tftypes.String, name),
 		"hostname":    tftypes.NewValue(tftypes.String, "kaito"),
 		"flavor_id":   tftypes.NewValue(tftypes.String, flavorID),
-		"firewall_id": tftypes.NewValue(tftypes.String, "LywOkvx5LWAp28NP"),
+		"firewall_id": tftypes.NewValue(tftypes.String, priorFirewall),
 		"access_configuration": tftypes.NewValue(serverStateType.AttributeTypes["access_configuration"], map[string]tftypes.Value{
 			"ssh_key_id":    tftypes.NewValue(tftypes.String, "Wl2ZE9mk6l37y1OZ"),
 			"password":      tftypes.NewValue(tftypes.String, nil),
@@ -77,9 +77,10 @@ func serverValue(name, flavorID string, ssdGB int64) tftypes.Value {
 // before the change under test. It is fixed so that each test only has to state
 // what it changes.
 const (
-	priorName   = "kaito"
-	priorFlavor = "2x8"
-	priorSSD    = 40
+	priorName     = "kaito"
+	priorFlavor   = "2x8"
+	priorSSD      = 40
+	priorFirewall = "LywOkvx5LWAp28NP"
 )
 
 type recordedRequest struct {
