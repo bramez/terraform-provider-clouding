@@ -399,3 +399,109 @@ func TestResizeServerValidationError(t *testing.T) {
 	assert.Contains(t, err.Error(), "The volume size must be equal or greater than the current.")
 	assert.Contains(t, err.Error(), "volumeSizeGb")
 }
+
+func TestConfigureBackups(t *testing.T) {
+	t.Parallel()
+	var gotMethod, gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("error reading request body: %s", err)
+		}
+		gotBody = string(body)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, err = w.Write([]byte(`
+		{
+		  "id": "awqYZWO4njxQyOV0",
+		  "status": "inProgress",
+		  "type": "configureBackups",
+		  "resourceId": "7y1OZWl2ZE9mk6l3",
+		  "resourceType": "server"
+		}
+		`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	action, err := client.ConfigureBackups("7y1OZWl2ZE9mk6l3", BackupPreference{Slots: 7, Frequency: "oneDay"})
+	if err != nil {
+		t.Errorf("getting error calling ConfigureBackups: %s", err)
+	}
+
+	assert.Equal(t, http.MethodPost, gotMethod)
+	assert.Equal(t, "/v1/servers/7y1OZWl2ZE9mk6l3/backups", gotPath)
+	assert.JSONEq(t, `{"slots":7,"frequency":"oneDay"}`, gotBody)
+	assert.Equal(t, "awqYZWO4njxQyOV0", action.ID)
+	assert.Equal(t, "configureBackups", action.Type)
+}
+
+func TestDisableBackups(t *testing.T) {
+	t.Parallel()
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, err := w.Write([]byte(`{"id":"awqYZWO4njxQyOV0","status":"pending","type":"disableBackups"}`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	action, err := client.DisableBackups("7y1OZWl2ZE9mk6l3")
+	if err != nil {
+		t.Errorf("getting error calling DisableBackups: %s", err)
+	}
+
+	assert.Equal(t, http.MethodDelete, gotMethod)
+	assert.Equal(t, "/v1/servers/7y1OZWl2ZE9mk6l3/backups", gotPath)
+	assert.Equal(t, "disableBackups", action.Type)
+}
+
+// A validation 400 must reach the user with the API's own detail, the same as
+// the other server endpoints.
+func TestConfigureBackupsValidationError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, err := w.Write([]byte(`
+		{
+		  "title": "One or more validation errors occurred.",
+		  "status": 400,
+		  "detail": "The frequency is not valid.",
+		  "errors": {"frequency": ["Invalid value"]}
+		}
+		`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	_, err = client.ConfigureBackups("7y1OZWl2ZE9mk6l3", BackupPreference{Slots: 7, Frequency: "OneDay"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "The frequency is not valid.")
+	assert.Contains(t, err.Error(), "frequency")
+}

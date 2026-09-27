@@ -10,13 +10,21 @@ import (
 	"github.com/bramez/terraform-provider-clouding/internal/clouding"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/stretchr/testify/assert"
 )
 
-// readServer runs Read() against a fake API answering with the given server
-// payload, starting from the fixed prior state, and returns the refreshed
-// firewall_id.
-func readServer(t *testing.T, firewalls string) (*resource.ReadResponse, string) {
+// readServer runs Read() against a fake API reporting the given firewalls,
+// starting from the prior state with no backup strategy.
+func readServer(t *testing.T, firewalls string) (*resource.ReadResponse, ServerResourceModel) {
+	t.Helper()
+
+	return readServerFrom(t, serverValue(priorName, priorFlavor, priorSSD), firewalls, `null`)
+}
+
+// readServerFrom is the same for the cases that need a different prior state or a
+// backup strategy in the API response.
+func readServerFrom(t *testing.T, stateRaw tftypes.Value, firewalls, backups string) (*resource.ReadResponse, ServerResourceModel) {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -34,9 +42,10 @@ func readServer(t *testing.T, firewalls string) (*resource.ReadResponse, string)
 		  "powerState": "Running",
 		  "publicIp": "200.234.228.186",
 		  "accessConfiguration": {"sshKeyId": "MJpLa2W4PodQ9YOX", "savePassword": false},
-		  "firewalls": %s
+		  "firewalls": %s,
+		  "backupPreferences": %s
 		}
-		`, firewalls)))
+		`, firewalls, backups)))
 		if err != nil {
 			t.Errorf("error writing the response: %s", err)
 		}
@@ -50,7 +59,7 @@ func readServer(t *testing.T, firewalls string) (*resource.ReadResponse, string)
 	schemaResp := &resource.SchemaResponse{}
 	r.Schema(context.Background(), resource.SchemaRequest{}, schemaResp)
 
-	state := tfsdk.State{Schema: schemaResp.Schema, Raw: serverValue(priorName, priorFlavor, priorSSD)}
+	state := tfsdk.State{Schema: schemaResp.Schema, Raw: stateRaw}
 
 	resp := &resource.ReadResponse{State: state}
 	r.Read(context.Background(), resource.ReadRequest{State: state}, resp)
@@ -58,7 +67,7 @@ func readServer(t *testing.T, firewalls string) (*resource.ReadResponse, string)
 	var refreshed ServerResourceModel
 	resp.Diagnostics.Append(resp.State.Get(context.Background(), &refreshed)...)
 
-	return resp, refreshed.FirewallID.ValueString()
+	return resp, refreshed
 }
 
 // The Clouding API reports an empty firewall list on GET servers/{id} even for a
@@ -68,10 +77,10 @@ func readServer(t *testing.T, firewalls string) (*resource.ReadResponse, string)
 func TestServerResourceReadKeepsFirewallWhenApiReportsNone(t *testing.T) {
 	t.Parallel()
 
-	resp, firewallID := readServer(t, `[]`)
+	resp, refreshed := readServer(t, `[]`)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
-	assert.Equal(t, priorFirewall, firewallID)
+	assert.Equal(t, priorFirewall, refreshed.FirewallID.ValueString())
 }
 
 // A firewall reported by the API still wins, so a firewall swapped outside
@@ -79,8 +88,34 @@ func TestServerResourceReadKeepsFirewallWhenApiReportsNone(t *testing.T) {
 func TestServerResourceReadTakesFirewallReportedByApi(t *testing.T) {
 	t.Parallel()
 
-	resp, firewallID := readServer(t, `[{"id": "AE1GadQjRkK4kzpW", "name": "cravilab-prod"}]`)
+	resp, refreshed := readServer(t, `[{"id": "AE1GadQjRkK4kzpW", "name": "cravilab-prod"}]`)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
-	assert.Equal(t, "AE1GadQjRkK4kzpW", firewallID)
+	assert.Equal(t, "AE1GadQjRkK4kzpW", refreshed.FirewallID.ValueString())
+}
+
+// Backups switched off outside Terraform have to show up as drift, so that the
+// next apply turns the strategy back on. It is safe to surface it now that the
+// attribute no longer requires replacement.
+func TestServerResourceReadClearsBackupsWhenApiReportsNone(t *testing.T) {
+	t.Parallel()
+
+	resp, refreshed := readServerFrom(t, serverValueBackups(7, "oneDay"), `[]`, `null`)
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+	assert.Nil(t, refreshed.BackupPreference)
+}
+
+// And a strategy reported by the API lands in state with the API's own values.
+func TestServerResourceReadTakesBackupsReportedByApi(t *testing.T) {
+	t.Parallel()
+
+	resp, refreshed := readServerFrom(t, serverValue(priorName, priorFlavor, priorSSD), `[]`,
+		`{"slots": 14, "frequency": "twoDays"}`)
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+	if assert.NotNil(t, refreshed.BackupPreference) {
+		assert.Equal(t, int64(14), refreshed.BackupPreference.Slots.ValueInt64())
+		assert.Equal(t, "twoDays", refreshed.BackupPreference.Frequency.ValueString())
+	}
 }

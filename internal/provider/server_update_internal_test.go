@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bramez/terraform-provider-clouding/internal/clouding"
@@ -47,7 +48,22 @@ var serverStateType = tftypes.Object{
 	},
 }
 
+// serverValue builds a server with no backup strategy configured.
 func serverValue(name, flavorID string, ssdGB int64) tftypes.Value {
+	return serverValueWith(name, flavorID, ssdGB, tftypes.NewValue(serverStateType.AttributeTypes["backup_preference"], nil))
+}
+
+// serverValueBackups builds the prior server with a backup strategy, so the tests
+// that move the policy around only have to state the policy.
+func serverValueBackups(slots int64, frequency string) tftypes.Value {
+	return serverValueWith(priorName, priorFlavor, priorSSD,
+		tftypes.NewValue(serverStateType.AttributeTypes["backup_preference"], map[string]tftypes.Value{
+			"slots":     tftypes.NewValue(tftypes.Number, slots),
+			"frequency": tftypes.NewValue(tftypes.String, frequency),
+		}))
+}
+
+func serverValueWith(name, flavorID string, ssdGB int64, backups tftypes.Value) tftypes.Value {
 	return tftypes.NewValue(serverStateType, map[string]tftypes.Value{
 		"id":          tftypes.NewValue(tftypes.String, "jG4bZNnE8zKYx7LP"),
 		"name":        tftypes.NewValue(tftypes.String, name),
@@ -67,7 +83,7 @@ func serverValue(name, flavorID string, ssdGB int64) tftypes.Value {
 		"enable_private_network":           tftypes.NewValue(tftypes.Bool, false),
 		"enable_strict_antiddos_filtering": tftypes.NewValue(tftypes.Bool, false),
 		"user_data":                        tftypes.NewValue(tftypes.String, ""),
-		"backup_preference":                tftypes.NewValue(serverStateType.AttributeTypes["backup_preference"], nil),
+		"backup_preference":                backups,
 		"last_updated":                     tftypes.NewValue(tftypes.String, "Friday, 26-Sep-26 17:11:50 CEST"),
 		"timeouts":                         tftypes.NewValue(serverStateType.AttributeTypes["timeouts"], map[string]tftypes.Value{"create": tftypes.NewValue(tftypes.String, nil)}),
 	})
@@ -95,6 +111,16 @@ type recordedRequest struct {
 func updateServer(t *testing.T, planName, planFlavor string, planSSD int64) (*resource.UpdateResponse, []recordedRequest) {
 	t.Helper()
 
+	return updateServerFrom(t,
+		serverValue(priorName, priorFlavor, priorSSD),
+		serverValue(planName, planFlavor, planSSD))
+}
+
+// updateServerFrom is the same for the cases that need a prior state other than
+// the default one, such as moving a backup strategy around.
+func updateServerFrom(t *testing.T, stateRaw, planRaw tftypes.Value) (*resource.UpdateResponse, []recordedRequest) {
+	t.Helper()
+
 	var recorded []recordedRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -108,7 +134,7 @@ func updateServer(t *testing.T, planName, planFlavor string, planSSD int64) (*re
 		case r.URL.Path == "/v1/actions/awqYZWO4njxQyOV0":
 			w.WriteHeader(http.StatusOK)
 			_, err = w.Write([]byte(`{"id":"awqYZWO4njxQyOV0","status":"completed","type":"resize"}`))
-		case r.Method == http.MethodPost:
+		case r.Method == http.MethodPost, r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/backups"):
 			w.WriteHeader(http.StatusAccepted)
 			_, err = w.Write([]byte(`{"id":"awqYZWO4njxQyOV0","status":"inProgress","type":"resize","resourceId":"jG4bZNnE8zKYx7LP","resourceType":"server"}`))
 		default:
@@ -127,8 +153,8 @@ func updateServer(t *testing.T, planName, planFlavor string, planSSD int64) (*re
 	schemaResp := &resource.SchemaResponse{}
 	r.Schema(context.Background(), resource.SchemaRequest{}, schemaResp)
 
-	state := tfsdk.State{Schema: schemaResp.Schema, Raw: serverValue(priorName, priorFlavor, priorSSD)}
-	plan := tfsdk.Plan{Schema: schemaResp.Schema, Raw: serverValue(planName, planFlavor, planSSD)}
+	state := tfsdk.State{Schema: schemaResp.Schema, Raw: stateRaw}
+	plan := tfsdk.Plan{Schema: schemaResp.Schema, Raw: planRaw}
 
 	resp := &resource.UpdateResponse{State: state}
 	r.Update(context.Background(), resource.UpdateRequest{State: state, Plan: plan}, resp)
@@ -221,6 +247,70 @@ func TestServerResourceUpdateWithoutChangesCallsNothing(t *testing.T) {
 	t.Parallel()
 
 	resp, recorded := updateServer(t, priorName, priorFlavor, priorSSD)
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+	assert.Empty(t, recorded, "expected no API calls")
+}
+
+// Enabling backups goes through POST servers/{id}/backups. Before this,
+// backup_preference required replacement, so turning backups on destroyed and
+// recreated the server.
+func TestServerResourceUpdateEnablesBackups(t *testing.T) {
+	t.Parallel()
+
+	resp, recorded := updateServerFrom(t,
+		serverValue(priorName, priorFlavor, priorSSD),
+		serverValueBackups(7, "oneDay"))
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+
+	backups := findRequest(recorded, http.MethodPost, "/v1/servers/jG4bZNnE8zKYx7LP/backups")
+	if assert.NotNil(t, backups, "expected a configure backups call, got: %v", recorded) {
+		assert.JSONEq(t, `{"slots":7,"frequency":"oneDay"}`, backups.body)
+	}
+	assert.Nil(t, findRequest(recorded, http.MethodPost, "/v1/servers/jG4bZNnE8zKYx7LP/resize"))
+}
+
+// Changing the policy is the same endpoint, and must not recreate the server
+// either.
+func TestServerResourceUpdateChangesBackupPolicy(t *testing.T) {
+	t.Parallel()
+
+	resp, recorded := updateServerFrom(t,
+		serverValueBackups(7, "oneDay"),
+		serverValueBackups(14, "twoDays"))
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+
+	backups := findRequest(recorded, http.MethodPost, "/v1/servers/jG4bZNnE8zKYx7LP/backups")
+	if assert.NotNil(t, backups, "expected a configure backups call, got: %v", recorded) {
+		assert.JSONEq(t, `{"slots":14,"frequency":"twoDays"}`, backups.body)
+	}
+}
+
+// Dropping the block turns the strategy off through DELETE, keeping the backups
+// already created.
+func TestServerResourceUpdateDisablesBackups(t *testing.T) {
+	t.Parallel()
+
+	resp, recorded := updateServerFrom(t,
+		serverValueBackups(7, "oneDay"),
+		serverValue(priorName, priorFlavor, priorSSD))
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+
+	assert.NotNil(t, findRequest(recorded, http.MethodDelete, "/v1/servers/jG4bZNnE8zKYx7LP/backups"),
+		"expected a disable backups call, got: %v", recorded)
+	assert.Nil(t, findRequest(recorded, http.MethodPost, "/v1/servers/jG4bZNnE8zKYx7LP/backups"))
+}
+
+// An unchanged policy must not touch the API.
+func TestServerResourceUpdateLeavesUnchangedBackupsAlone(t *testing.T) {
+	t.Parallel()
+
+	resp, recorded := updateServerFrom(t,
+		serverValueBackups(7, "oneDay"),
+		serverValueBackups(7, "oneDay"))
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 	assert.Empty(t, recorded, "expected no API calls")
