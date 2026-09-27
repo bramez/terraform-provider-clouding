@@ -505,3 +505,39 @@ func TestConfigureBackupsValidationError(t *testing.T) {
 	assert.Contains(t, err.Error(), "The frequency is not valid.")
 	assert.Contains(t, err.Error(), "frequency")
 }
+
+// The API answers 400 when the strategy it is handed is identical to the one
+// already configured. Applying the same strategy twice is a no-op, not a failure:
+// it reports no error and no action to wait for, so an apply is not left broken by
+// state that spells the frequency differently from the API.
+func TestConfigureBackupsIsANoOpWhenNothingChanges(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, err := w.Write([]byte(`
+		{
+		  "title": "One or more validation errors occurred.",
+		  "status": 400,
+		  "detail": "Please refer to the errors property for additional details.",
+		  "errors": {
+		    "createBackupEvery": ["No change required.\nThe current configuration is the same"],
+		    "slots": ["No change required.\nThe current configuration is the same"]
+		  }
+		}
+		`))
+		if err != nil {
+			t.Errorf("error writing response: %s", err)
+		}
+	}))
+
+	client, err := NewAPI("token123", WithEndpoint(srv.URL))
+	if err != nil {
+		t.Errorf("getting error creating NewAPI: %s", err)
+	}
+
+	action, err := client.ConfigureBackups("7y1OZWl2ZE9mk6l3", BackupPreference{Slots: 7, Frequency: "oneDay"})
+
+	assert.NoError(t, err)
+	assert.Empty(t, action.ID, "a no-op leaves no action to wait for")
+}

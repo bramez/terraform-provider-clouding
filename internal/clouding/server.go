@@ -4,10 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 const (
 	SERVER_PATH = "servers"
+
+	// noBackupChangeRequired is the sentence the API puts in its validation errors
+	// when the backup strategy it is handed is identical to the current one.
+	noBackupChangeRequired = "No change required"
 )
 
 type Server struct {
@@ -261,6 +266,15 @@ func (a *API) ConfigureBackups(id string, preference BackupPreference) (Action, 
 		err = json.NewDecoder(response.Body).Decode(&errorResponse)
 		if err != nil {
 			return action, fmt.Errorf("error decoding error response: %s", err)
+		}
+		// The API rejects a strategy identical to the one already configured with a
+		// 400 whose validation errors say "No change required". Applying the same
+		// strategy twice is a no-op, not a failure — Terraform needs this call to be
+		// idempotent, otherwise state that merely spells the frequency differently
+		// from the API leaves every apply broken. There is no error code to match on,
+		// only that sentence.
+		if response.StatusCode == http.StatusBadRequest && strings.Contains(errorResponse.ValidationErrors(), noBackupChangeRequired) {
+			return action, nil
 		}
 		return action, fmt.Errorf("error configuring server backups, status code: %d, title: %s, detail: %s, validation errors: %s", errorResponse.Status, errorResponse.Title, errorResponse.Detail, errorResponse.ValidationErrors())
 	}
