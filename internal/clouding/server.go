@@ -237,3 +237,66 @@ func (a *API) ResizeServer(id string, request ResizeServerRequest) (Action, erro
 
 	return action, nil
 }
+
+// ConfigureBackups enables or changes the backup strategy of a server through
+// POST servers/{id}/backups, so the policy can be changed on a live server
+// instead of recreating it. Both fields are required by the API. It returns the
+// async action to wait on with WaitForAction.
+func (a *API) ConfigureBackups(id string, preference BackupPreference) (Action, error) {
+	var action Action
+
+	preferenceJSON, err := json.Marshal(preference)
+	if err != nil {
+		return action, fmt.Errorf("error marshaling backup preference: %s", err)
+	}
+
+	response, err := a.sendRequest(http.MethodPost, fmt.Sprintf("%s/%s/backups", SERVER_PATH, id), preferenceJSON)
+	if err != nil {
+		return action, fmt.Errorf("getting error from sendRequest: %s", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		var errorResponse ErrorResponse
+		err = json.NewDecoder(response.Body).Decode(&errorResponse)
+		if err != nil {
+			return action, fmt.Errorf("error decoding error response: %s", err)
+		}
+		return action, fmt.Errorf("error configuring server backups, status code: %d, title: %s, detail: %s, validation errors: %s", errorResponse.Status, errorResponse.Title, errorResponse.Detail, errorResponse.ValidationErrors())
+	}
+
+	err = json.NewDecoder(response.Body).Decode(&action)
+	if err != nil {
+		return action, fmt.Errorf("error decoding action: %s", err)
+	}
+
+	return action, nil
+}
+
+// DisableBackups stops the creation of backups for a server. The backups already
+// created are kept, so this only turns the strategy off.
+func (a *API) DisableBackups(id string) (Action, error) {
+	var action Action
+
+	response, err := a.sendRequest(http.MethodDelete, fmt.Sprintf("%s/%s/backups", SERVER_PATH, id), nil)
+	if err != nil {
+		return action, fmt.Errorf("getting error from sendRequest: %s", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusAccepted {
+		var errorResponse ErrorResponse
+		err = json.NewDecoder(response.Body).Decode(&errorResponse)
+		if err != nil {
+			return action, fmt.Errorf("error decoding error response: %s", err)
+		}
+		return action, fmt.Errorf("error disabling server backups, status code: %d, title: %s, detail: %s", errorResponse.Status, errorResponse.Title, errorResponse.Detail)
+	}
+
+	err = json.NewDecoder(response.Body).Decode(&action)
+	if err != nil {
+		return action, fmt.Errorf("error decoding action: %s", err)
+	}
+
+	return action, nil
+}

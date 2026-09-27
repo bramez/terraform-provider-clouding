@@ -115,8 +115,8 @@ Required:
 
 Optional:
 
-- `frequency` (String) Enum: ```OneDay``` ```TwoDays``` ```ThreeDays``` ```FourDays``` ```FiveDays``` ```SixDays``` ```OneWeek``` How often backups will be created.
-- `slots` (Number) [2..30]The number of backups that will be kept.
+- `frequency` (String) Enum: ```oneDay``` ```twoDays``` ```threeDays``` ```fourDays``` ```fiveDays``` ```sixDays``` ```oneWeek``` How often backups will be created. Changing it reconfigures the strategy in place, without recreating the server.
+- `slots` (Number) [2..30]The number of backups that will be kept. Changing it reconfigures the strategy in place, without recreating the server.
 
 
 <a id="nestedatt--timeouts"></a>

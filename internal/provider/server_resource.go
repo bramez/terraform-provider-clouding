@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -224,27 +223,21 @@ func (r *ServerResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				Attributes: map[string]schema.Attribute{
 					"slots": schema.Int64Attribute{
 						MarkdownDescription: "[2..30]" +
-							"The number of backups that will be kept.",
+							"The number of backups that will be kept. Changing it reconfigures the strategy in place, without recreating the server.",
 						Optional: true,
 						Validators: []validator.Int64{
 							int64validator.AtLeast(2),
 							int64validator.AtMost(30),
 						},
-						PlanModifiers: []planmodifier.Int64{
-							int64planmodifier.RequiresReplace(),
-						},
 					},
 					"frequency": schema.StringAttribute{
-						MarkdownDescription: "Enum: ```OneDay``` ```TwoDays``` ```ThreeDays``` ```FourDays``` ```FiveDays``` ```SixDays``` ```OneWeek``` " +
-							"How often backups will be created.",
+						MarkdownDescription: "Enum: ```oneDay``` ```twoDays``` ```threeDays``` ```fourDays``` ```fiveDays``` ```sixDays``` ```oneWeek``` " +
+							"How often backups will be created. Changing it reconfigures the strategy in place, without recreating the server.",
 						Optional: true,
 						Validators: []validator.String{
 							stringvalidator.Any(
-								stringvalidator.OneOf("OneDay", "TwoDays", "ThreeDays", "FourDays", "FiveDays", "SixDays", "OneWeek"),
+								stringvalidator.OneOf("oneDay", "twoDays", "threeDays", "fourDays", "fiveDays", "sixDays", "oneWeek"),
 							),
-						},
-						PlanModifiers: []planmodifier.String{
-							stringplanmodifier.RequiresReplace(),
 						},
 					},
 				},
@@ -492,11 +485,17 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	state.EnablePrivateNetwork = types.BoolValue(server.EnablePrivateNetwork)
 	state.EnableStrictAntiDDoSFiltering = types.BoolValue(server.EnableStrictAntiDDoSFiltering)
 	state.UserData = types.StringValue(server.UserData)
+	// The API reports no strategy at all when backups are off, and that absence is
+	// refreshed into state rather than ignored, so backups switched off outside
+	// Terraform show up as drift. It is safe to surface it now that the attribute
+	// is reconfigured in place instead of requiring replacement.
 	if server.BackupPreference != nil {
 		state.BackupPreference = &BackupPreferenceModel{
 			Slots:     types.Int64Value(server.BackupPreference.Slots),
 			Frequency: types.StringValue(server.BackupPreference.Frequency),
 		}
+	} else {
+		state.BackupPreference = nil
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -553,10 +552,44 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
+	// The backup strategy has its own endpoints, so changing it does not recreate
+	// the server either. Dropping the block turns the strategy off and keeps the
+	// backups already created.
+	if !backupPreferenceEqual(plan.BackupPreference, state.BackupPreference) {
+		var action clouding.Action
+		var err error
+		if plan.BackupPreference == nil {
+			action, err = r.client.DisableBackups(plan.Id.ValueString())
+		} else {
+			action, err = r.client.ConfigureBackups(plan.Id.ValueString(), clouding.BackupPreference{
+				Slots:     plan.BackupPreference.Slots.ValueInt64(),
+				Frequency: plan.BackupPreference.Frequency.ValueString(),
+			})
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to update server backups, got error: %s", err))
+			return
+		}
+		err = r.client.WaitForAction(ctx, &action, 5*time.Second)
+		if err != nil {
+			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to wait for server backups action, got error: %s", err))
+			return
+		}
+	}
+
 	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// backupPreferenceEqual reports whether two backup strategies are the same,
+// treating a missing block as "no strategy".
+func backupPreferenceEqual(a, b *BackupPreferenceModel) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Slots.Equal(b.Slots) && a.Frequency.Equal(b.Frequency)
 }
 
 func (r *ServerResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
