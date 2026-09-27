@@ -45,6 +45,8 @@ type Server struct {
 	PrivateIP                     string               `json:"privateIp,omitempty"`
 	SshKeyID                      string               `json:"sshKeyId,omitempty"`
 	Firewalls                     []Firewall           `json:"firewalls,omitempty"`
+	PublicPorts                   []Port               `json:"publicPorts,omitempty"`
+	VpcPorts                      []Port               `json:"vpcPorts,omitempty"`
 	Snapshots                     []Snapshot           `json:"snapshots,omitempty"`
 	Backups                       []Backup             `json:"backups,omitempty"`
 	Cost                          ServerCost           `json:"cost,omitempty"`
@@ -57,6 +59,15 @@ type AccessConfiguration struct {
 	Password     string `json:"password,omitempty"`
 	HasPassword  bool   `json:"hasPassword,omitempty"`
 	SavePassword bool   `json:"savePassword,omitempty"`
+}
+
+// Port is a public or VPC port of a server. Only the firewalls are modelled: they
+// are where the API keeps the firewall association now that the server's own
+// firewalls array is deprecated.
+type Port struct {
+	ID        string     `json:"id,omitempty"`
+	IPAddress string     `json:"ipAddress,omitempty"`
+	Firewalls []Firewall `json:"firewalls,omitempty"`
 }
 
 type Volume struct {
@@ -101,7 +112,15 @@ func (a *API) GetServerID(server *Server) error {
 		return fmt.Errorf("error decoding server: %s", err)
 	}
 	server.FlavorID = server.Flavor
-	// Guarded: a server with no firewall attached would panic on Firewalls[0].
+	// The server's own firewalls array is deprecated and, in the API's own words,
+	// "no longer populated": firewalls now hang off each public and VPC port, and
+	// the ones previously attached to the server were applied to all of them. So it
+	// is filled back in from the ports, and FirewallID reports the first one found.
+	// Reading only the deprecated field left it empty, which the resource took for a
+	// removed firewall and turned into a plan that recreated the server.
+	if len(server.Firewalls) == 0 {
+		server.Firewalls = firewallsFromPorts(server.PublicPorts, server.VpcPorts)
+	}
 	if len(server.Firewalls) > 0 {
 		server.FirewallID = server.Firewalls[0].ID
 	}
@@ -313,4 +332,23 @@ func (a *API) DisableBackups(id string) (Action, error) {
 	}
 
 	return action, nil
+}
+
+// firewallsFromPorts collects the firewalls attached to a server's ports, without
+// repeating the ones applied to more than one port.
+func firewallsFromPorts(ports ...[]Port) []Firewall {
+	var firewalls []Firewall
+	seen := map[string]bool{}
+	for _, group := range ports {
+		for _, port := range group {
+			for _, firewall := range port.Firewalls {
+				if seen[firewall.ID] {
+					continue
+				}
+				seen[firewall.ID] = true
+				firewalls = append(firewalls, firewall)
+			}
+		}
+	}
+	return firewalls
 }
