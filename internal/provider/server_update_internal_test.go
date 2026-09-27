@@ -113,12 +113,14 @@ func updateServer(t *testing.T, planName, planFlavor string, planSSD int64) (*re
 
 	return updateServerFrom(t,
 		serverValue(priorName, priorFlavor, priorSSD),
-		serverValue(planName, planFlavor, planSSD))
+		serverValue(planName, planFlavor, planSSD),
+		http.StatusAccepted)
 }
 
 // updateServerFrom is the same for the cases that need a prior state other than
-// the default one, such as moving a backup strategy around.
-func updateServerFrom(t *testing.T, stateRaw, planRaw tftypes.Value) (*resource.UpdateResponse, []recordedRequest) {
+// the default one, such as moving a backup strategy around. backupsStatus is what
+// the fake API answers to a configure backups call.
+func updateServerFrom(t *testing.T, stateRaw, planRaw tftypes.Value, backupsStatus int) (*resource.UpdateResponse, []recordedRequest) {
 	t.Helper()
 
 	var recorded []recordedRequest
@@ -134,6 +136,13 @@ func updateServerFrom(t *testing.T, stateRaw, planRaw tftypes.Value) (*resource.
 		case r.URL.Path == "/v1/actions/awqYZWO4njxQyOV0":
 			w.WriteHeader(http.StatusOK)
 			_, err = w.Write([]byte(`{"id":"awqYZWO4njxQyOV0","status":"completed","type":"resize"}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/backups"):
+			w.WriteHeader(backupsStatus)
+			if backupsStatus == http.StatusAccepted {
+				_, err = w.Write([]byte(`{"id":"awqYZWO4njxQyOV0","status":"inProgress","type":"configureBackups"}`))
+			} else {
+				_, err = w.Write([]byte(`{"title":"One or more validation errors occurred.","status":400,"errors":{"slots":["No change required.\nThe current configuration is the same"]}}`))
+			}
 		case r.Method == http.MethodPost, r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/backups"):
 			w.WriteHeader(http.StatusAccepted)
 			_, err = w.Write([]byte(`{"id":"awqYZWO4njxQyOV0","status":"inProgress","type":"resize","resourceId":"jG4bZNnE8zKYx7LP","resourceType":"server"}`))
@@ -260,7 +269,8 @@ func TestServerResourceUpdateEnablesBackups(t *testing.T) {
 
 	resp, recorded := updateServerFrom(t,
 		serverValue(priorName, priorFlavor, priorSSD),
-		serverValueBackups(7, "oneDay"))
+		serverValueBackups(7, "oneDay"),
+		http.StatusAccepted)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 
@@ -278,7 +288,8 @@ func TestServerResourceUpdateChangesBackupPolicy(t *testing.T) {
 
 	resp, recorded := updateServerFrom(t,
 		serverValueBackups(7, "oneDay"),
-		serverValueBackups(14, "twoDays"))
+		serverValueBackups(14, "twoDays"),
+		http.StatusAccepted)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 
@@ -295,7 +306,8 @@ func TestServerResourceUpdateDisablesBackups(t *testing.T) {
 
 	resp, recorded := updateServerFrom(t,
 		serverValueBackups(7, "oneDay"),
-		serverValue(priorName, priorFlavor, priorSSD))
+		serverValue(priorName, priorFlavor, priorSSD),
+		http.StatusAccepted)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 
@@ -310,8 +322,27 @@ func TestServerResourceUpdateLeavesUnchangedBackupsAlone(t *testing.T) {
 
 	resp, recorded := updateServerFrom(t,
 		serverValueBackups(7, "oneDay"),
-		serverValueBackups(7, "oneDay"))
+		serverValueBackups(7, "oneDay"),
+		http.StatusAccepted)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
 	assert.Empty(t, recorded, "expected no API calls")
+}
+
+// State can spell the frequency differently from the API — the enum casing changed
+// in v1.2.0 — so the strategy looks different to Terraform while the API considers
+// it identical. That apply must go through instead of failing, and with no action
+// to wait for there is nothing to poll.
+func TestServerResourceUpdateAcceptsUnchangedBackupsRejectedByTheApi(t *testing.T) {
+	t.Parallel()
+
+	resp, recorded := updateServerFrom(t,
+		serverValueBackups(7, "OneDay"),
+		serverValueBackups(7, "oneDay"),
+		http.StatusBadRequest)
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+	assert.NotNil(t, findRequest(recorded, http.MethodPost, "/v1/servers/jG4bZNnE8zKYx7LP/backups"))
+	assert.Nil(t, findRequest(recorded, http.MethodGet, "/v1/actions/awqYZWO4njxQyOV0"),
+		"a no-op leaves no action to poll")
 }

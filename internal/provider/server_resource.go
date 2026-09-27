@@ -575,10 +575,14 @@ func (r *ServerResource) Update(ctx context.Context, req resource.UpdateRequest,
 			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to update server backups, got error: %s", err))
 			return
 		}
-		err = r.client.WaitForAction(ctx, &action, 5*time.Second)
-		if err != nil {
-			resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to wait for server backups action, got error: %s", err))
-			return
+		// A strategy the API already had configured is applied as a no-op and leaves
+		// no action, so there is nothing to poll.
+		if action.ID != "" {
+			err = r.client.WaitForAction(ctx, &action, 5*time.Second)
+			if err != nil {
+				resp.Diagnostics.AddError("Clouding API Error", fmt.Sprintf("Unable to wait for server backups action, got error: %s", err))
+				return
+			}
 		}
 	}
 
