@@ -485,17 +485,22 @@ func (r *ServerResource) Read(ctx context.Context, req resource.ReadRequest, res
 	state.EnablePrivateNetwork = types.BoolValue(server.EnablePrivateNetwork)
 	state.EnableStrictAntiDDoSFiltering = types.BoolValue(server.EnableStrictAntiDDoSFiltering)
 	state.UserData = types.StringValue(server.UserData)
-	// The API reports no strategy at all when backups are off, and that absence is
-	// refreshed into state rather than ignored, so backups switched off outside
-	// Terraform show up as drift. It is safe to surface it now that the attribute
-	// is reconfigured in place instead of requiring replacement.
-	if server.BackupPreference != nil {
+	// GET servers/{id} does not report the backup strategy in a shape this provider
+	// can read back: the field is missing from the response, and the API's own
+	// validation errors name a frequency field (createBackupEvery) that its
+	// published schema does not have. So an absent or frequency-less strategy is
+	// treated as no information and whatever is in state is kept, the same as with
+	// firewall_id above. Refreshing it to empty instead made every plan want to
+	// reconfigure an unchanged strategy, which the API answers with a 400 ("No
+	// change required. The current configuration is the same").
+	//
+	// The cost is that backups switched off outside Terraform are not detected.
+	// Fixing that needs the real response shape, not a guess at it.
+	if server.BackupPreference != nil && server.BackupPreference.Frequency != "" {
 		state.BackupPreference = &BackupPreferenceModel{
 			Slots:     types.Int64Value(server.BackupPreference.Slots),
 			Frequency: types.StringValue(server.BackupPreference.Frequency),
 		}
-	} else {
-		state.BackupPreference = nil
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)

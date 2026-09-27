@@ -94,16 +94,35 @@ func TestServerResourceReadTakesFirewallReportedByApi(t *testing.T) {
 	assert.Equal(t, "AE1GadQjRkK4kzpW", refreshed.FirewallID.ValueString())
 }
 
-// Backups switched off outside Terraform have to show up as drift, so that the
-// next apply turns the strategy back on. It is safe to surface it now that the
-// attribute no longer requires replacement.
-func TestServerResourceReadClearsBackupsWhenApiReportsNone(t *testing.T) {
+// GET servers/{id} does not report the backup strategy in a shape this provider
+// can read back, so an absent one means "no information" and the strategy already
+// in state is kept. Clearing it made every plan want to reconfigure an unchanged
+// strategy, which the API rejects with "No change required".
+func TestServerResourceReadKeepsBackupsWhenApiReportsNone(t *testing.T) {
 	t.Parallel()
 
 	resp, refreshed := readServerFrom(t, serverValueBackups(7, "oneDay"), `[]`, `null`)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
-	assert.Nil(t, refreshed.BackupPreference)
+	if assert.NotNil(t, refreshed.BackupPreference) {
+		assert.Equal(t, int64(7), refreshed.BackupPreference.Slots.ValueInt64())
+		assert.Equal(t, "oneDay", refreshed.BackupPreference.Frequency.ValueString())
+	}
+}
+
+// A strategy reported without a frequency is partial information — the API names
+// that field differently from its published schema — so it is discarded too
+// rather than written into state as an empty frequency.
+func TestServerResourceReadKeepsBackupsWhenApiReportsPartial(t *testing.T) {
+	t.Parallel()
+
+	resp, refreshed := readServerFrom(t, serverValueBackups(7, "oneDay"), `[]`,
+		`{"slots": 7, "createBackupEvery": "oneDay"}`)
+
+	assert.False(t, resp.Diagnostics.HasError(), "expected no error, got: %v", resp.Diagnostics)
+	if assert.NotNil(t, refreshed.BackupPreference) {
+		assert.Equal(t, "oneDay", refreshed.BackupPreference.Frequency.ValueString())
+	}
 }
 
 // And a strategy reported by the API lands in state with the API's own values.
